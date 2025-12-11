@@ -1,0 +1,89 @@
+services:
+  # =========================
+  # Kafka-compatible broker (Redpanda)
+  # =========================
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.2
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"   # Kafka endpoint (from host: localhost:9092)
+      - "9644:9644"   # Admin API (optional)
+    networks:
+      - microservices-net
+
+  # =========================
+  # OrderService (producer)
+  # =========================
+  orderservice:
+    build:
+      context: ../src/OrderService
+      dockerfile: Dockerfile
+    container_name: orderservice
+    environment:
+      ASPNETCORE_URLS: "http://+:8080"
+      Kafka__BootstrapServers: "redpanda:9092"
+      Kafka__OrderCreatedTopic: "order-created"
+    depends_on:
+      - redpanda
+    ports:
+      - "5001:8080"   # optional direct access for debugging
+    networks:
+      - microservices-net
+
+  # =========================
+  # InventoryService (consumer)
+  # =========================
+  inventoryservice:
+    build:
+      context: ../src/InventoryService
+      dockerfile: Dockerfile
+    container_name: inventoryservice
+    environment:
+      ASPNETCORE_URLS: "http://+:8080"
+      Kafka__BootstrapServers: "redpanda:9092"
+      Kafka__OrderCreatedTopic: "order-created"
+    depends_on:
+      - redpanda
+    ports:
+      - "5002:8080"   # optional direct access for debugging
+    networks:
+      - microservices-net
+
+  # =========================
+  # API Gateway (YARP)
+  # =========================
+  apigateway:
+    build:
+      context: ../src/ApiGateway
+      dockerfile: Dockerfile
+    container_name: apigateway
+    environment:
+      ASPNETCORE_URLS: "http://+:8080"
+    depends_on:
+      - orderservice
+      - inventoryservice
+    ports:
+      - "8080:8080"   # public entrypoint: http://localhost:8080
+    networks:
+      - microservices-net
+
+networks:
+  microservices-net:
+    driver: bridge
